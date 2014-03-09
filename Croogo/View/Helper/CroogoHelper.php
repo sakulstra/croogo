@@ -84,13 +84,18 @@ class CroogoHelper extends AppHelper {
  * @param array $options
  * @return string menu html tags
  */
-	public function adminMenus($menus, $options = array(), $depth = 0) {
+	public function adminMenus($menus, $options = array(), $parent = null) {
 		$options = Hash::merge(array(
-			'type' => 'sidebar',
-			'children' => true,
-			'htmlAttributes' => array(
-				'class' => 'nav nav-stacked',
+			'hasChild' => array(
+				'class' => 'hasChild'
 			),
+			'data-target' => false,
+			'icon' => array(
+				'class' => 'icon-'
+			),
+			'root' => array('ul' => array(), 'li' => array(), 'a' => array()),
+			'node' => array('ul' => array(), 'li' => array(), 'a' => array()),
+			'leaf' => array('ul' => array(), 'li' => array(), 'a' => array()),
 		), $options);
 
 		$aclPlugin = Configure::read('Site.acl_plugin');
@@ -99,113 +104,69 @@ class CroogoHelper extends AppHelper {
 			return '';
 		}
 
-		$sidebar = $options['type'] === 'sidebar';
-		$out = null;
-		$sorted = Hash::sort($menus, '{s}.weight', 'ASC');
+		$sortedMenu = Hash::sort($menus, '{s}.weight', 'ASC');
 		if (empty($this->Role)) {
 			$this->Role = ClassRegistry::init('Users.Role');
 			$this->Role->Behaviors->attach('Croogo.Aliasable');
 		}
 		$currentRole = $this->Role->byId($this->Layout->getRoleId());
-
-		foreach ($sorted as $menu) {
+		$result = null;
+		foreach ($sortedMenu as $key => $menuEntry) {
 			if (isset($menu['separator'])) {
 				$liOptions['class'] = 'divider';
-				$out .= $this->Html->tag('li', null, $liOptions);
+				$result .= $this->Html->tag('li', null, $liOptions);
 				continue;
 			}
-			$htmlAttributes = $options['htmlAttributes'];
-			if ($currentRole != 'admin' && !$this->{$aclPlugin}->linkIsAllowedByUserId($userId, $menu['url'])) {
+			if ($currentRole != 'admin' && !$this->{$aclPlugin}->linkIsAllowedByUserId($userId, $menuEntry['url'])) {
 				continue;
 			}
-
-			if (empty($menu['htmlAttributes']['class'])) {
-				$menuClass = Inflector::slug(strtolower('menu-' . $menu['title']), '-');
-				$menu['htmlAttributes'] = Hash::merge(array(
-					'class' => $menuClass
-				), $menu['htmlAttributes']);
-			}
-			$title = '';
-			if ($menu['icon'] === false) {
-			} elseif (empty($menu['icon'])) {
-				$menu['htmlAttributes'] += array('icon' => 'white');
+			if ($parent == null) {
+				$type = 'root';
+			} else if (!empty($menuEntry['children'])) {
+				$type = 'node';
 			} else {
-				$menu['htmlAttributes'] += array('icon' => $menu['icon']);
+				$type = 'leaf';
 			}
-			if ($sidebar) {
-				$title .= '<span>' . $menu['title'] . '</span>';
-			} else {
-				$title .= $menu['title'];
+			$inA = null;
+			if (is_array($menuEntry['icon'])) {
+				$inA .= $this->Html->tag('i', '', array('class' => $options['icon']['class'] . $menuEntry['icon'][0])) . ' ';
+			}else{
+				$inA .= $this->Html->tag('i', '', array('class' => $options['icon']['class'] . $menuEntry['icon'])) . ' ';
 			}
-			$children = '';
-			if (!empty($menu['children'])) {
-				$childClass = '';
-				if ($sidebar) {
-					$childClass = 'nav nav-stacked sub-nav ';
-					$childClass .= ' submenu-' . Inflector::slug(strtolower($menu['title']), '-');
-					if ($depth > 0) {
-						$childClass .= ' dropdown-menu';
+			$inA .= $menuEntry['title'];
+			$menuEntry['url'] = $this->url($menuEntry['url']);
+			$submenu = null;
+			$aOptions = Hash::merge($options[$type]['a'], array('href' => $menuEntry['url']));
+			if($options['data-target']){
+				$aOptions['data-target'] = '#menu-' . $key;
+			}
+			if ($menuEntry['url'] == env('REQUEST_URI')) {
+				if (isset($aOptions['class'])) {
+					$aOptions['class'] .= ' current';
+				} else {
+					$aOptions['class'] = 'current';
+				}
+			}
+			if (!empty($menuEntry['children'])) {
+				if(isset($options['hasChild']['class'])){
+					if(!isset($aOptions['class'])){
+						$aOptions['class'] = $options['hasChild']['class'];
+					}else{
+						$aOptions['class'] .= ' '.$options['hasChild']['class'];
 					}
-				} else {
-					if ($depth == 0) {
-						$childClass = 'dropdown-menu';
-					}
 				}
-				$children = $this->adminMenus($menu['children'], array(
-					'type' => $options['type'],
-					'children' => true,
-					'htmlAttributes' => array('class' => $childClass),
-				), $depth + 1);
-
-				$menu['htmlAttributes']['class'] .= ' hasChild dropdown-close';
-			}
-			$menu['htmlAttributes']['class'] .= ' sidebar-item';
-
-			$menuUrl = $this->url($menu['url']);
-			if ($menuUrl == env('REQUEST_URI')) {
-				if (isset($menu['htmlAttributes']['class'])) {
-					$menu['htmlAttributes']['class'] .= ' current';
-				} else {
-					$menu['htmlAttributes']['class'] = 'current';
-				}
+				$submenu = $this->adminMenus($menuEntry['children'], $options, $key);
 			}
 
-			if (!$sidebar && !empty($children)) {
-				if ($depth == 0) {
-					$title .= ' <b class="caret"></b>';
-				}
-				$menu['htmlAttributes']['class'] = 'dropdown-toggle';
-				$menu['htmlAttributes']['data-toggle'] = 'dropdown';
-			}
-
-			if (isset($menu['before'])) {
-				$title = $menu['before'] . $title;
-			}
-
-			if (isset($menu['after'])) {
-				$title = $title . $menu['after'];
-			}
-
-			$link = $this->Html->link($title, $menu['url'], $menu['htmlAttributes']);
-			$liOptions = array();
-			if ($sidebar && !empty($children) && $depth > 0) {
-				$liOptions['class'] = ' dropdown-submenu';
-			}
-			if (!$sidebar && !empty($children)) {
-				if ($depth > 0) {
-					$liOptions['class'] = ' dropdown-submenu';
-				} else {
-					$liOptions['class'] = ' dropdown';
-				}
-			}
-			$out .= $this->Html->tag('li', $link . $children, $liOptions);
+			$inLi = $this->Html->tag('a', $inA, $aOptions);
+			$result .= $this->Html->tag('li', $inLi . $submenu, $options[$type]['li']);
 		}
-
-		if (!$sidebar && $depth > 0) {
-			$htmlAttributes['class'] = 'dropdown-menu';
+		$ulOptions = array();
+		if ($parent != null) {
+			$ulOptions['id'] = 'menu-' . $parent;
 		}
-
-		return $this->Html->tag('ul', $out, $htmlAttributes);
+		$ulOptions = Hash::merge($options[$type]['ul'],$ulOptions);
+		return $this->Html->tag('ul', $result, $ulOptions);
 	}
 
 /**
